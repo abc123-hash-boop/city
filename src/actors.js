@@ -1,0 +1,24 @@
+import {People} from './people.js';
+import {liveBus} from './life.js';
+import * as T from 'three';
+import {rand} from './sim.js';
+import {graphOf,shortest} from './terrain.js';
+const OBJ=new T.Object3D(),COL=new T.Color();
+const make=(scene,geo,mat,n)=>{let m=new T.InstancedMesh(geo,mat,n);m.instanceMatrix.setUsage(T.DynamicDrawUsage);m.frustumCulled=false;m.castShadow=true;m.receiveShadow=true;scene.add(m);return m};
+function matrix(mesh,i,x,y,z,w,h,d,rot=0){OBJ.position.set(x,y,z);OBJ.rotation.set(0,rot,0);OBJ.scale.set(w,h,d);OBJ.updateMatrix();mesh.setMatrixAt(i,OBJ.matrix)}
+export class Actors{
+ constructor(world){this.w=world;this.graph=graphOf(world.t);this.r=rand(world.t.seed+391);this.valid=this.graph.filter(n=>n.edges.length);let r=this.r;const mat=new T.MeshStandardMaterial({color:0xffffff,roughness:.55,metalness:.16}),glass=new T.MeshStandardMaterial({color:'#5e777b',roughness:.29,metalness:.42});this.cars=[];let colors=['#c6a163','#d8d9cc','#a76352','#e0d7bb','#426f76','#d6d5bb','#80949a','#8d9d83','#b98569'];const n=66;
+ this.body=make(world.scene,new T.BoxGeometry(),mat,n);this.cab=make(world.scene,new T.BoxGeometry(),glass,n);this.top=make(world.scene,new T.BoxGeometry(),mat,n);this.tires=make(world.scene,new T.BoxGeometry(),new T.MeshStandardMaterial({color:'#46534e'}),n);
+ for(let i=0;i<n;i++){let node=this.valid[Math.floor(r()*this.valid.length)];let c={a:node.id,b:node.edges[Math.floor(r()*node.edges.length)],f:r(),speed:1.8+r()*1.85,color:colors[i%colors.length],bus:i===0,routeIndex:0,reverse:1};if(c.bus)c.color='#dfac57';this.cars.push(c);this.body.setColorAt(i,COL.set(c.color));this.top.setColorAt(i,COL.set(c.color))}
+ this.people=new People(world);
+ this.boats=[];for(let i=0;i<4;i++){let g=new T.Group();function add(w,h,d,y,c,x=0,z=0){let m=new T.Mesh(new T.BoxGeometry(w,h,d),new T.MeshStandardMaterial({color:c,metalness:.12,roughness:.6}));m.position.set(x,y,z);m.castShadow=true;g.add(m)}add(3.55,.38,1.25,.1,'#e3e0cb');add(3.47,.16,1.28,.19,i%2?'#ad6c50':'#5f8584');add(1.67,.59,.95,.54,'#769494',.11);add(1.9,.10,1.07,.90,'#e8dfc5',.11);add(.43,.08,.81,.34,'#b59b7a',1.4);if(i===1||i===2){add(.055,3.79,.055,2.08,'#877e68',.18);let geo=new T.BufferGeometry();geo.setAttribute('position',new T.Float32BufferAttribute([.10,.58,.02,.10,3.91,.02,-1.39,.73,.10,.29,.71,.04,1.58,.61,.04,.28,3.51,.04],3));geo.computeVertexNormals();let sail=new T.Mesh(geo,new T.MeshStandardMaterial({color:i===1?'#f1dfb8':'#e3d9b0',roughness:.85,side:T.DoubleSide}));sail.castShadow=true;g.add(sail)}world.scene.add(g);let xx=-130+i*75,edges=[-156,...world.t.bridges,156].sort((a,b)=>a-b),j=Math.max(0,edges.findIndex((v,j)=>j<edges.length-1&&xx>=v&&xx<edges[j+1]));this.boats.push({g,x:Math.max(edges[j]+5,Math.min(edges[j+1]-5,xx)),side:i%2?1:-1,lane:i%2?1:-1,lo:edges[j]+5,hi:edges[j+1]-5})}
+ this.route();this.step(0,0)
+ }
+ nearest(p){return this.valid.reduce((a,b)=>Math.hypot(a.x-p.x,a.z-p.z)<Math.hypot(b.x-p.x,b.z-p.z)?a:b)}
+ route(){let [p,q]=this.w.s.route.map(id=>this.w.lots.get(id));this.path=p&&q?shortest(this.graph,this.nearest(p),this.nearest(q)):[];let c=this.cars[0];if(this.path.length>1){c.a=this.path[0];c.b=this.path[1];c.routeIndex=0;c.reverse=1;c.f=0}}
+ progress(c,dt){let a=this.graph[c.a],b=this.graph[c.b],len=Math.hypot(b.x-a.x,b.z-a.z);c.f+=dt*c.speed/len;if(c.f>=1){let prev=c.a;c.a=c.b;c.f%=1;if(c.bus&&this.path.length>1){c.routeIndex+=c.reverse;if(c.routeIndex>=this.path.length-1||c.routeIndex<=0)c.reverse*=-1;c.b=this.path[c.routeIndex+c.reverse]}else if(c.orders?.length){c.b=c.orders.shift()}else{let choices=b.edges.filter(id=>id!==prev);c.b=choices.length?choices[Math.floor(this.r()*choices.length)]:prev}a=this.graph[c.a];b=this.graph[c.b];len=Math.hypot(b.x-a.x,b.z-a.z)}let dx=(b.x-a.x)/len,dz=(b.z-a.z)/len;return [a.x+(b.x-a.x)*c.f,a.z+(b.z-a.z)*c.f,dx,dz,Math.atan2(dx,dz)]}
+ step(dt,time){let t=this.w.t;for(let i=0;i<this.cars.length;i++){let c=this.cars[i],bus=c.bus,p=bus?liveBus(this.w.s):null;let [x,z,dx,dz,rot]=p?[p.x,p.z,Math.sin(p.rot),Math.cos(p.rot),p.rot]:this.progress(c,dt);let y=t.onBridge(x,z)?.34:.025;if(!p){x+=dz*.81;z-=dx*.81;}matrix(this.tires,i,x,y+.16,z,bus?.95:.79,.30,bus?3.81:1.68,rot);matrix(this.body,i,x,y+(bus?.59:.37),z,bus?1.02:.86,bus?.71:.38,bus?3.89:1.83,rot);matrix(this.cab,i,x-dx*.09,y+(bus?1.05:.66),z-dz*.09,bus?.995:.72,bus?.55:.27,bus?3.55:1.02,rot);matrix(this.top,i,x-dx*.08,y+(bus?1.35:.81),z-dz*.08,bus?1.02:.75,.083,bus?3.8:.96,rot)}
+ this.people.update();for(let m of [this.tires,this.body,this.cab,this.top])m.instanceMatrix.needsUpdate=true;
+ for(const b of this.boats){b.x+=dt*.65*b.side;if(b.x>b.hi){b.x=b.hi;b.side=-1}if(b.x<b.lo){b.x=b.lo;b.side=1}let z=t.river(b.x)+b.lane*2.7;b.g.position.set(b.x,-.62+Math.sin(time*1.1+b.x)*.018,z);b.g.rotation.y=-Math.atan2(t.river(b.x+.3)-t.river(b.x),.3)+(b.side<0?Math.PI:0);b.g.rotation.x=.016*Math.sin(time*.66+b.x)}
+ }
+}
